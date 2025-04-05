@@ -57,9 +57,15 @@ function updateUILanguage() {
 // Constants
 const BLUESKY_API = 'https://bsky.social';
 const RATE_LIMITS = {
-    UNFOLLOW_DELAY_MS: 2000, // 2 seconds between unfollows
-    MAX_UNFOLLOWS_PER_MINUTE: 25, // Limiting to 25 unfollows per minute
-    PROFILE_INFO_DELAY_MS: 50 // 50ms between profile info requests
+    // Direct operation limits
+    UNFOLLOW_DELAY_MS: 1000, // 1 second between unfollows (can be lower now based on Bluesky's limits)
+    PROFILE_INFO_DELAY_MS: 25, // 25ms between profile info requests (less conservative)
+    
+    // Bluesky's documented rate limits (as of April 2025)
+    MAX_UNFOLLOWS_PER_MINUTE: 60, // Can be higher based on 5,000 points/hour limit for DELETE ops (1 point each)
+    MAX_UNFOLLOWS_PER_HOUR: 3000, // Value lower than the 5,000 points/hour to be safe
+    MAX_UNFOLLOWS_PER_DAY: 30000, // Value lower than the 35,000 points/day to be safe
+    MAX_API_REQUESTS: 2500 // 3000 per 5 minutes, using 2500 to be conservative
 };
 
 // LocalStorage keys
@@ -134,6 +140,66 @@ function setProgressBar(progressBar, percent) {
 
 function showError(message) {
     alert(message);
+}
+
+// Helper functions for rate limiting and countdown
+async function countdownTimer(seconds, messageKey, statusCallback) {
+    // Create a promise that will resolve after the countdown is complete
+    return new Promise((resolve) => {
+        let remainingSeconds = seconds;
+        
+        // Update the status immediately with the initial countdown
+        if (statusCallback) {
+            statusCallback(__(messageKey, { seconds: remainingSeconds }));
+        }
+        
+        // Create the interval to update the countdown every second
+        const countdownInterval = setInterval(() => {
+            remainingSeconds--;
+            
+            // Update the status with the new countdown
+            if (statusCallback && remainingSeconds > 0) {
+                statusCallback(__(messageKey, { seconds: remainingSeconds }));
+            }
+            
+            // If countdown is complete, clear the interval and resolve the promise
+            if (remainingSeconds <= 0) {
+                clearInterval(countdownInterval);
+                resolve();
+            }
+        }, 1000); // Update every 1 second
+    });
+}
+
+// Minutes countdown version for longer waits
+async function countdownTimerMinutes(minutes, messageKey, statusCallback) {
+    const totalSeconds = minutes * 60;
+    let remainingSeconds = totalSeconds;
+    
+    // Update the status immediately with the initial countdown
+    if (statusCallback) {
+        statusCallback(__(messageKey, { minutes }));
+    }
+    
+    return new Promise((resolve) => {
+        const countdownInterval = setInterval(() => {
+            remainingSeconds--;
+            
+            // Calculate remaining minutes and seconds
+            const remainingMinutes = Math.floor(remainingSeconds / 60);
+            
+            // Update status only once per minute to avoid too many updates
+            if (remainingSeconds % 60 === 0 && statusCallback && remainingSeconds > 0) {
+                statusCallback(__(messageKey, { minutes: remainingMinutes }));
+            }
+            
+            // If countdown is complete, clear the interval and resolve the promise
+            if (remainingSeconds <= 0) {
+                clearInterval(countdownInterval);
+                resolve();
+            }
+        }, 1000);
+    });
 }
 
 // Whitelist functions
@@ -231,6 +297,7 @@ async function fetchAllPages(endpoint, actor, dataKey) {
     return results;
 }
 
+// Modify getFollows() function to include follow URIs
 async function getFollows() {
     if (!state.session) throw new Error("Not logged in");
     
@@ -244,6 +311,7 @@ async function getFollows() {
         handle: follow.handle,
         displayName: follow.displayName || follow.handle,
         did: follow.did,
+        followUri: follow.viewer?.following // Store the follow URI
     }));
 }
 
@@ -320,44 +388,27 @@ async function enrichWithProfileData(users, progressCallback) {
     return users;
 }
 
-async function unfollowUser(did) {
+// Then simplify unfollowUser function
+async function unfollowUser(did, followUri) {
     if (!state.session) throw new Error("Not logged in");
     if (!did) throw new Error("Invalid DID provided");
-
+    if (!followUri) {
+        console.error("Follow URI not provided");
+        return false;
+    }
+    
     try {
-        // First, find the existing follow record URI
-        const response1 = await fetch(`${BLUESKY_API}/xrpc/app.bsky.graph.getFollows?actor=${state.session.did}&limit=100`, {
-            headers: {
-                "Authorization": `Bearer ${state.session.accessJwt}`,
-            }
-        });
-
-        if (!response1.ok) {
-            console.error("Failed to get follows");
-            return false;
-        }
-
-        const data = await response1.json();
-        const follow = data.follows.find(f => f.did === did);
-        
-        if (!follow) {
-            console.error("Follow record not found");
-            return false;
-        }
-        
-        // Extract the follow record URI from the follow object
-        // This requires that the first response contains the target user
-        // If not found, we would need to paginate through all follows
-        const parts = follow.viewer?.following?.split('/');
+        // Extract the rkey from the URI
+        const parts = followUri.split('/');
         if (!parts || parts.length < 2) {
-            console.error("Follow record URI not found");
+            console.error("Invalid follow URI format");
             return false;
         }
         
         const rkey = parts[parts.length - 1];
         
-        // Now delete the follow record using the com.atproto.repo.deleteRecord endpoint
-        const response2 = await fetch(`${BLUESKY_API}/xrpc/com.atproto.repo.deleteRecord`, {
+        // Delete the follow record using com.atproto.repo.deleteRecord endpoint
+        const response = await fetch(`${BLUESKY_API}/xrpc/com.atproto.repo.deleteRecord`, {
             method: "POST",
             headers: {
                 "Authorization": `Bearer ${state.session.accessJwt}`,
@@ -370,8 +421,8 @@ async function unfollowUser(did) {
             })
         });
 
-        if (!response2.ok) {
-            const error = await response2.json();
+        if (!response.ok) {
+            const error = await response.json();
             console.error(`Failed to unfollow: ${error.message || "Unknown error"}`);
             return false;
         }
@@ -392,7 +443,15 @@ async function unfollowSelected(users, selectedIndices, progressCallback, status
     let successful = 0;
     let failed = 0;
     let minuteCounter = 0;
+    let hourCounter = 0;
     const startTime = Date.now();
+    
+    // Store operation counts for rate limiting
+    const opCounts = {
+        minute: 0,
+        hour: 0,
+        day: 0
+    };
     
     for (let i = 0; i < indices.length; i++) {
         const index = indices[i];
@@ -402,40 +461,76 @@ async function unfollowSelected(users, selectedIndices, progressCallback, status
             continue;
         }
         
-        // Check if we need to slow down due to rate limits
+        // Check if we've hit any rate limits
         const currentMinute = Math.floor((Date.now() - startTime) / 60000);
+        const currentHour = Math.floor((Date.now() - startTime) / 3600000);
+        
+        // Minute threshold check
         if (currentMinute > minuteCounter) {
             minuteCounter = currentMinute;
+            opCounts.minute = 0; // Reset minute counter when minute changes
             if (statusCallback) {
-                statusCallback(`Minute ${minuteCounter + 1}`);
+                statusCallback(__('minute', {count: minuteCounter + 1}));
             }
         }
-
-        // If we've hit the rate limit for this minute, wait until the next minute
-        const unfollowsThisMinute = successful % RATE_LIMITS.MAX_UNFOLLOWS_PER_MINUTE;
-        if (unfollowsThisMinute === 0 && successful > 0) {
+        
+        // Hour threshold check
+        if (currentHour > hourCounter) {
+            hourCounter = currentHour;
+            opCounts.hour = 0; // Reset hour counter when hour changes
+            if (statusCallback) {
+                statusCallback(__('hour', {count: hourCounter + 1}));
+            }
+        }
+        
+        // Check if we need to pause due to rate limits
+        if (opCounts.minute >= RATE_LIMITS.MAX_UNFOLLOWS_PER_MINUTE) {
             const waitTime = 60000 - ((Date.now() - startTime) % 60000);
             if (statusCallback) {
-                statusCallback(`Rate limit reached. Waiting ${Math.ceil(waitTime / 1000)} seconds...`);
+                statusCallback(__('minuteRateLimitReached', {seconds: Math.ceil(waitTime / 1000)}));
             }
-            await new Promise(resolve => setTimeout(resolve, waitTime));
+            await countdownTimer(Math.ceil(waitTime / 1000), 'minuteRateLimitReached', statusCallback);
             if (statusCallback) {
-                statusCallback(`Continuing...`);
+                statusCallback(__('continuing'));
             }
             minuteCounter++;
+            opCounts.minute = 0;
+        }
+        
+        // Check if we've hit hourly limit
+        if (opCounts.hour >= RATE_LIMITS.MAX_UNFOLLOWS_PER_HOUR) {
+            const waitTime = 3600000 - ((Date.now() - startTime) % 3600000);
             if (statusCallback) {
-                statusCallback(`Minute ${minuteCounter + 1}`);
+                statusCallback(__('hourlyRateLimitReached', {minutes: Math.ceil(waitTime / 60000)}));
             }
+            await countdownTimerMinutes(Math.ceil(waitTime / 60000), 'hourlyRateLimitReached', statusCallback);
+            if (statusCallback) {
+                statusCallback(__('continuing'));
+            }
+            hourCounter++;
+            opCounts.hour = 0;
+        }
+        
+        // Check if we've hit daily limit
+        if (successful >= RATE_LIMITS.MAX_UNFOLLOWS_PER_DAY) {
+            if (statusCallback) {
+                statusCallback(__('dailyRateLimitReached'));
+            }
+            break; // Stop processing if we hit the daily limit
         }
 
         if (statusCallback) {
-            statusCallback(`Unfollowing @${user.handle} (${i + 1}/${indices.length})...`);
+            statusCallback(__('unfollowing', {handle: user.handle, current: i + 1, total: indices.length}));
         }
         
-        const result = await unfollowUser(user.did);
+        const result = await unfollowUser(user.did, user.followUri);
         
         if (result) {
             successful++;
+            // Increment operation counters
+            opCounts.minute++;
+            opCounts.hour++;
+            opCounts.day++;
         } else {
             failed++;
         }
