@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title data-lang="title">Bluesky Follower Checker</title>
+    <style>
+        :root {
+            --primary: #0085ff;
+            --primary-dark: #0070d9;
+            --secondary: #f1f5f9;
+            --text-dark: #334155;
+            --text-light: #64748b;
+            --text-very-light: #94a3b8;
+            --bg: #ffffff;
+            --bg-secondary: #f8fafc;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+            line-height: 1.6;
+            color: var(--text-dark);
+            background-color: var(--bg-secondary);
+            padding: 20px 10px;
+            max-width: 900px;
+            margin: 0 auto;
+            font-size: 16px;
+        }
+
+        h1, h2, h3, h4 {
+            margin-bottom: 0.8rem;
+            color: var(--text-dark);
+            word-wrap: break-word;
+        }
+
+        h1 {
+            font-size: 1.8rem;
+        }
+
+        h2 {
+            font-size: 1.5rem;
+        }
+
+        .container {
+            background-color: var(--bg);
+            padding: 1.2rem;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+            margin-bottom: 1.5rem;
+            width: 100%;
+        }
+
+        .info-box {
+            background-color: #e0f2fe;
+            border-left: 4px solid var(--primary);
+            padding: 1rem;
+            margin: 1rem 0;
+            border-radius: 4px;
+            font-size: 0.9rem;
+        }
+
+        button {
+            background-color: var(--primary);
+            color: white;
+            border: none;
+            padding: 10px 16px;
+            font-size: 1rem;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+            white-space: nowrap;
+            text-overflow: ellipsis;
+            overflow: hidden;
+        }
+
+        button:hover {
+            background-color: var(--primary-dark);
+        }
+
+        button:disabled {
+            background-color: var(--text-very-light);
+            cursor: not-allowed;
+        }
+
+        input[type="text"],
+        input[type="password"],
+        textarea {
+            width: 100%;
+            padding: 10px;
+            font-size: 1rem;
+            border: 1px solid var(--text-very-light);
+            border-radius: 6px;
+            margin-bottom: 1rem;
+        }
+
+        .progress-container {
+            width: 100%;
+            background-color: var(--secondary);
+            border-radius: 10px;
+            margin: 10px 0;
+        }
+
+        .progress-bar {
+            height: 10px;
+            background-color: var(--primary);
+            border-radius: 10px;
+            width: 0%;
+            transition: width 0.3s;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1rem 0;
+            table-layout: fixed;
+        }
+
+        th, td {
+            padding: 8px;
+            text-align: left;
+            border-bottom: 1px solid var(--secondary);
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+        }
+
+        th {
+            background-color: var(--bg-secondary);
+        }
+
+        tr:hover {
+            background-color: var(--secondary);
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .tab-container {
+            margin-bottom: 1rem;
+            border-bottom: 1px solid var(--secondary);
+            display: flex;
+            width: 100%;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .tab-button {
+            background-color: transparent;
+            color: var(--text-light);
+            padding: 10px 16px;
+            border: none;
+            border-bottom: 2px solid transparent;
+            flex: 1;
+            min-width: min-content;
+        }
+
+        .tab-button.active {
+            color: var(--primary);
+            border-bottom: 2px solid var(--primary);
+        }
+
+        .tab-content {
+            display: none;
+            padding-top: 1rem;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .checkbox-container {
+            display: flex;
+            align-items: center;
+            margin-bottom: 0.5rem;
+            flex-wrap: wrap;
+        }
+
+        .checkbox-container input[type="checkbox"] {
+            margin-right: 10px;
+            min-width: 20px;
+            min-height: 20px;
+        }
+
+        .label-text {
+            font-size: 0.9rem;
+            color: var(--text-light);
+            margin-top: 0.5rem;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 12px;
+            background-color: var(--secondary);
+            color: var(--text-light);
+            font-size: 0.8rem;
+            margin-left: 5px;
+        }
+
+        #whitelist {
+            width: 100%;
+            height: 100px;
+        }
+
+        .actions-container {
+            display: flex;
+            gap: 10px;
+            margin-top: 1rem;
+            flex-direction: row;
+            flex-wrap: wrap;
+        }
+
+        .actions-container button {
+            flex: 1;
+            min-width: 120px;
+            margin-bottom: 5px;
+        }
+
+        footer {
+            text-align: center;
+            margin-top: 2rem;
+            color: var(--text-light);
+            font-size: 0.9rem;
+            padding: 0 10px;
+        }
+
+        /* Loading spinner */
+        .spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(0, 0, 0, 0.1);
+            border-radius: 50%;
+            border-top-color: var(--primary);
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Language selector styles */
+        .language-selector {
+            position: relative;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            justify-content: flex-end;
+            margin-bottom: 15px;
+        }
+        
+        .language-selector select {
+            padding: 4px 8px;
+            border-radius: 4px;
+            border: 1px solid var(--text-very-light);
+            background-color: var(--bg);
+            font-size: 0.9rem;
+        }
+
+        /* Responsive table */
+        .mobile-label {
+            display: none;
+            font-weight: bold;
+            margin-right: 5px;
+        }
+
+        /* Responsive media queries */
+        @media (max-width: 768px) {
+            body {
+                padding: 10px;
+            }
+
+            .container {
+                padding: 1rem;
+            }
+            
+            h1 {
+                font-size: 1.5rem;
+            }
+            
+            h2, h3 {
+                font-size: 1.2rem;
+            }
+
+            /* Table responsive design for small screens */
+            table, thead, tbody, th, td, tr { 
+                display: block; 
+            }
+            
+            thead tr { 
+                position: absolute;
+                top: -9999px;
+                left: -9999px;
+            }
+            
+            tr { 
+                margin-bottom: 15px;
+                border: 1px solid var(--secondary);
+                border-radius: 6px;
+                padding: 8px;
+            }
+            
+            td { 
+                border: none;
+                border-bottom: 1px solid var(--secondary);
+                position: relative;
+                padding-left: 10px;
+                display: flex;
+                align-items: center;
+            }
+            
+            td:last-child {
+                border-bottom: none;
+            }
+            
+            .mobile-label {
+                display: inline-block;
+            }
+            
+            /* Button adjustments */
+            .actions-container {
+                flex-direction: column;
+            }
+            
+            .actions-container button {
+                width: 100%;
+            }
+
+            /* Make checkboxes easier to tap on mobile */
+            input[type="checkbox"] {
+                transform: scale(1.2);
+            }
+        }
+
+        @media (max-width: 480px) {
+            .tab-container {
+                flex-direction: row;
+                overflow-x: auto;
+            }
+            
+            .tab-button {
+                flex: 0 0 auto;
+                padding: 8px 12px;
+            }
+        }
+
+        .profile-button {
+            display: inline-block;
+            width: 32px;
+            height: 32px;
+            padding: 5px;
+            margin-left: 5px;
+            background-color: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 4px;
+            text-align: center;
+            cursor: pointer;
+            text-decoration: none;
+            transition: background-color 0.3s;
+            vertical-align: middle;
+            line-height: 1;
+        }
+
+        .profile-button:hover {
+            background-color: var(--primary-dark);
+        }
+
+        .external-link-icon {
+            width: 100%;
+            height: 100%;
+            display: inline-flex;
+            justify-content: center;
+            align-items: center;
+        }
+    </style>
+</head>
+<body>
+    <!-- Language Selector -->
+    <div class="language-selector">
+        <label for="languageSelector" data-lang="languageSelector">Language:</label>
+        <select id="languageSelector" onchange="handleLanguageChange(event)">
+            <option value="en" data-lang="english">English</option>
+            <option value="tr" data-lang="turkish">Turkish</option>
+        </select>
+    </div>
+
+    <div class="container">
+        <h1 data-lang="title">Bluesky Follower Checker</h1>
+        <p data-lang="description">Check who doesn't follow you back on Bluesky, create lists, and unfollow accounts.</p>
+
+        <div class="info-box">
+            <p><strong>Note:</strong> <span data-lang="securityNote">This is a client-side app. Your login credentials are never stored or sent to any server except Bluesky's API. The code runs entirely in your browser.</span></p>
+        </div>
+    </div>
+
+    <!-- Login Section -->
+    <div id="loginSection" class="container">
+        <h2 data-lang="login">Login to Bluesky</h2>
+        <div>
+            <label for="identifier" data-lang="identifier">Email or Handle:</label>
+            <input type="text" id="identifier" data-lang-placeholder="identifierPlaceholder">
+        </div>
+        <div>
+            <label for="password" data-lang="password">Password or App Password:</label>
+            <input type="password" id="password" data-lang-placeholder="passwordPlaceholder">
+            <p class="label-text" data-lang="appPasswordTip">Tip: Using an <a href="https://bsky.app/settings/app-passwords" target="_blank">App Password</a> is recommended for security.</p>
+        </div>
+        <div class="info-box">
+            <p data-lang="whitelistInfo">When you uncheck accounts, they will be remembered and automatically unchecked next time you use the tool. Your whitelist is saved in your browser.</p>
+        </div>
+        <div>
+            <button id="loginButton" data-lang="loginButton">Login & Check Followers</button>
+        </div>
+    </div>
+
+    <!-- Results Section (Initially Hidden) -->
+    <div id="resultsSection" class="container hidden">
+        <div id="userInfo"></div>
+        
+        <div class="tab-container">
+            <button class="tab-button active" data-tab="nonFollowers" data-lang="tabNonFollowers">Non-Followers</button>
+            <button class="tab-button" data-tab="actions" data-lang="tabActions">Actions</button>
+        </div>
+        
+        <div id="nonFollowersTab" class="tab-content active">
+            <div id="statsContainer"></div>
+            <div id="loadingFollowCounts" class="hidden">
+                <p><span data-lang="loadingFollowCounts">Loading following counts... {progress}%</span><span id="followCountsProgress">0</span>%</p>
+                <div class="progress-container">
+                    <div id="followCountsProgressBar" class="progress-bar"></div>
+                </div>
+            </div>
+            
+            <div class="checkbox-container">
+                <input type="checkbox" id="selectAllCheckbox">
+                <label for="selectAllCheckbox" data-lang="selectAll">Select/Deselect All</label>
+            </div>
+            
+            <div class="table-responsive">
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width: 50px;"></th>
+                            <th data-lang="account">Account</th>
+                            <th style="width: 120px;" data-lang="follows">Follows</th>
+                        </tr>
+                    </thead>
+                    <tbody id="nonFollowersTable">
+                        <!-- Will be populated by JavaScript -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        
+        <div id="actionsTab" class="tab-content">
+            <h3 data-lang="whatToDo">What would you like to do with selected accounts?</h3>
+            
+            <div class="actions-container">
+                <button id="unfollowButton" data-lang="unfollowButton">Unfollow Selected (0)</button>
+                <button id="createListButton" data-lang="createListButton">Create List (0)</button>
+                <button id="bothButton" data-lang="bothButton">Both (List & Unfollow) (0)</button>
+            </div>
+            
+            <div id="actionProgress" class="hidden">
+                <h4 id="actionTitle" data-lang="processing">Processing...</h4>
+                <p id="actionStatus"></p>
+                <div class="progress-container">
+                    <div id="actionProgressBar" class="progress-bar"></div>
+                </div>
+            </div>
+            
+            <div id="actionResults" class="hidden">
+                <h4 data-lang="results">Results:</h4>
+                <div id="actionResultsContent"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Logout Button (Initially Hidden) -->
+    <div id="logoutContainer" class="hidden" style="text-align: center; margin-top: 1rem;">
+        <button id="logoutButton" data-lang="logout">Logout</button>
+    </div>
+
+    <footer>
+        <p data-lang="footer">Made with ❤️ | <a href="https://github.com/bcanata/bluesky-follower-checker" target="_blank">View on GitHub</a></p>
+    </footer>
+
+    <script src="languages.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
