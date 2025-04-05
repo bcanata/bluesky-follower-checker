@@ -325,19 +325,53 @@ async function unfollowUser(did) {
     if (!did) throw new Error("Invalid DID provided");
 
     try {
-        const response = await fetch(`${BLUESKY_API}/xrpc/app.bsky.graph.follow`, {
-            method: "DELETE",
+        // First, find the existing follow record URI
+        const response1 = await fetch(`${BLUESKY_API}/xrpc/app.bsky.graph.getFollows?actor=${state.session.did}&limit=100`, {
+            headers: {
+                "Authorization": `Bearer ${state.session.accessJwt}`,
+            }
+        });
+
+        if (!response1.ok) {
+            console.error("Failed to get follows");
+            return false;
+        }
+
+        const data = await response1.json();
+        const follow = data.follows.find(f => f.did === did);
+        
+        if (!follow) {
+            console.error("Follow record not found");
+            return false;
+        }
+        
+        // Extract the follow record URI from the follow object
+        // This requires that the first response contains the target user
+        // If not found, we would need to paginate through all follows
+        const parts = follow.viewer?.following?.split('/');
+        if (!parts || parts.length < 2) {
+            console.error("Follow record URI not found");
+            return false;
+        }
+        
+        const rkey = parts[parts.length - 1];
+        
+        // Now delete the follow record using the com.atproto.repo.deleteRecord endpoint
+        const response2 = await fetch(`${BLUESKY_API}/xrpc/com.atproto.repo.deleteRecord`, {
+            method: "POST",
             headers: {
                 "Authorization": `Bearer ${state.session.accessJwt}`,
                 "Content-Type": "application/json"
             },
             body: JSON.stringify({
-                subject: did,
+                repo: state.session.did,
+                collection: "app.bsky.graph.follow",
+                rkey: rkey
             })
         });
 
-        if (!response.ok) {
-            const error = await response.json();
+        if (!response2.ok) {
+            const error = await response2.json();
             console.error(`Failed to unfollow: ${error.message || "Unknown error"}`);
             return false;
         }
