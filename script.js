@@ -572,8 +572,6 @@ elements.tabButtons.forEach(button => {
             if (state.followersYouDontFollow.length === 0 && state.followers.length > 0 && state.follows.length > 0) {
                 loadFollowersYouDontFollow();
             }
-        } else {
-            activeContent = document.getElementById('actionsTab');
         }
         
         if (activeContent) {

@@ -427,7 +427,6 @@
         <div class="tab-container">
             <button class="tab-button active" data-tab="nonFollowers" data-lang="tabNonFollowers">Non-Followers</button>
             <button class="tab-button" data-tab="followersYouDontFollow" data-lang="tabFollowersYouDontFollow">Followers You Don't Follow</button>
-            <button class="tab-button" data-tab="actions" data-lang="tabActions">Actions</button>
         </div>
         
         <div id="nonFollowersTab" class="tab-content active">
@@ -457,6 +456,28 @@
                         <!-- Will be populated by JavaScript -->
                     </tbody>
                 </table>
+            </div>
+            
+            <!-- Actions section moved from its own tab to here -->
+            <h3 data-lang="whatToDo">What would you like to do with selected accounts?</h3>
+            
+            <div class="actions-container">
+                <button id="unfollowButton" data-lang="unfollowButton">Unfollow Selected (0)</button>
+                <button id="createListButton" data-lang="createListButton">Create List (0)</button>
+                <button id="bothButton" data-lang="bothButton">Both (List & Unfollow) (0)</button>
+            </div>
+            
+            <div id="actionProgress" class="hidden">
+                <h4 id="actionTitle" data-lang="processing">Processing...</h4>
+                <p id="actionStatus"></p>
+                <div class="progress-container">
+                    <div id="actionProgressBar" class="progress-bar"></div>
+                </div>
+            </div>
+            
+            <div id="actionResults" class="hidden">
+                <h4 data-lang="results">Results:</h4>
+                <div id="actionResultsContent"></div>
             </div>
         </div>
         
@@ -511,34 +532,6 @@
                 <div id="followActionResultsContent"></div>
             </div>
         </div>
-        
-        <div id="actionsTab" class="tab-content">
-            <h3 data-lang="whatToDo">What would you like to do with selected accounts?</h3>
-            
-            <div class="actions-container">
-                <button id="unfollowButton" data-lang="unfollowButton">Unfollow Selected (0)</button>
-                <button id="createListButton" data-lang="createListButton">Create List (0)</button>
-                <button id="bothButton" data-lang="bothButton">Both (List & Unfollow) (0)</button>
-            </div>
-            
-            <div id="actionProgress" class="hidden">
-                <h4 id="actionTitle" data-lang="processing">Processing...</h4>
-                <p id="actionStatus"></p>
-                <div class="progress-container">
-                    <div id="actionProgressBar" class="progress-bar"></div>
-                </div>
-            </div>
-            
-            <div id="actionResults" class="hidden">
-                <h4 data-lang="results">Results:</h4>
-                <div id="actionResultsContent"></div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Logout Button (Initially Hidden) -->
-    <div id="logoutContainer" class="hidden" style="text-align: center; margin-top: 1rem;">
-        <button id="logoutButton" data-lang="logout">Logout</button>
     </div>
 
     <footer>
