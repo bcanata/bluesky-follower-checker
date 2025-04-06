@@ -157,11 +157,19 @@ const elements = {
 
 // Helper functions
 function showElement(element) {
-    element.classList.remove('hidden');
+    if (element) {
+        element.classList.remove('hidden');
+    } else {
+        console.warn("Attempted to show a null element");
+    }
 }
 
 function hideElement(element) {
-    element.classList.add('hidden');
+    if (element) {
+        element.classList.add('hidden');
+    } else {
+        console.warn("Attempted to hide a null element");
+    }
 }
 
 function setProgressBar(progressBar, percent) {
@@ -551,53 +559,82 @@ async function createFollowListWithAccounts(users, selectedIndices, progressCall
 }
 
 // Tab functionality
-elements.tabButtons.forEach(button => {
-    button.addEventListener('click', () => {
-        const tab = button.getAttribute('data-tab');
-        
-        // Update active tab button
-        elements.tabButtons.forEach(btn => btn.classList.remove('active'));
-        button.classList.add('active');
-        
-        // Update active tab content
-        elements.tabContents.forEach(content => content.classList.remove('active'));
-        
-        // Activate the correct tab content
-        let activeContent;
-        if (tab === 'nonFollowers') {
-            activeContent = document.getElementById('nonFollowersTab');
-        } else if (tab === 'followersYouDontFollow') {
-            activeContent = document.getElementById('followersYouDontFollowTab');
-            // If this tab is being activated and we haven't loaded the data yet, do it now
-            if (state.followersYouDontFollow.length === 0 && state.followers.length > 0 && state.follows.length > 0) {
-                loadFollowersYouDontFollow();
-            }
-        }
-        
-        if (activeContent) {
-            activeContent.classList.add('active');
+if (elements.tabButtons && elements.tabButtons.length > 0) {
+    elements.tabButtons.forEach(button => {
+        if (button) {
+            button.addEventListener('click', () => {
+                const tab = button.getAttribute('data-tab');
+                
+                // Update active tab button
+                elements.tabButtons.forEach(btn => {
+                    if (btn) {
+                        btn.classList.remove('active');
+                    }
+                });
+                button.classList.add('active');
+                
+                // Update active tab content
+                if (elements.tabContents && elements.tabContents.length > 0) {
+                    elements.tabContents.forEach(content => {
+                        if (content) {
+                            content.classList.remove('active');
+                        }
+                    });
+                }
+                
+                // Activate the correct tab content
+                let activeContent;
+                if (tab === 'nonFollowers') {
+                    activeContent = document.getElementById('nonFollowersTab');
+                } else if (tab === 'followersYouDontFollow') {
+                    activeContent = document.getElementById('followersYouDontFollowTab');
+                    // If this tab is being activated and we haven't loaded the data yet, do it now
+                    if (activeContent && state.followersYouDontFollow.length === 0 && state.followers.length > 0 && state.follows.length > 0) {
+                        loadFollowersYouDontFollow();
+                    }
+                }
+                
+                if (activeContent) {
+                    activeContent.classList.add('active');
+                }
+            });
         }
     });
-});
+}
 
 // API interaction functions
 async function loginToBluesky(identifier, password) {
     try {
+        console.log("Attempting to create session with Bluesky API");
         const response = await fetch(`${BLUESKY_API}/xrpc/com.atproto.server.createSession`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ identifier, password }),
         });
 
+        // Log the status of the response for debugging
+        console.log(`Bluesky API response status: ${response.status} (${response.ok ? 'OK' : 'Error'})`);
+
         if (!response.ok) {
             const error = await response.json();
+            console.error("Login API error response:", error);
             throw new Error(`Login failed: ${error.message || "Unknown error"}`);
         }
 
-        return await response.json();
+        // Parse the response body
+        const data = await response.json();
+        console.log("Login successful, received session data");
+        return data;
     } catch (error) {
-        console.error("Login failed:", error);
-        throw new Error("Login failed. Please check your credentials.");
+        // More detailed error logging
+        if (error.name === "SyntaxError") {
+            console.error("Failed to parse response as JSON. Possible network or API issue.");
+        } else {
+            console.error("Login error:", error.message || error);
+        }
+        // Instead of rethrowing with a generic message, pass through the original error
+        // This will help us identify what's actually happening
+        throw error;
     }
 }
 
@@ -1061,7 +1098,7 @@ function populateNonFollowersTable() {
         
         row.innerHTML = `
             <td>
-                <input type="checkbox" id="checkbox-${index}" data-index="${index}" class="account-checkbox" ${isWhitelisted ? '' : 'checked'}>
+                <input type="checkbox" id="checkbox-${index}" data-index="${index}" class="account-checkbox custom-checkbox" ${isWhitelisted ? '' : 'checked'}>
             </td>
             <td>
                 <span class="mobile-label">${__('account')}:</span>
@@ -1086,22 +1123,6 @@ function populateNonFollowersTable() {
                     '–'}
             </td>
         `;
-        
-        // Make the entire row clickable (except for the checkbox or profile button)
-        row.style.cursor = 'pointer';
-        row.addEventListener('click', function(event) {
-            // Don't toggle if clicking directly on the checkbox or profile button
-            if (event.target.type !== 'checkbox' && 
-                !event.target.classList.contains('profile-button') &&
-                event.target.tagName !== 'A') {
-                const checkbox = this.querySelector('.account-checkbox');
-                checkbox.checked = !checkbox.checked;
-                
-                // Trigger the change event manually
-                const changeEvent = new Event('change', { bubbles: true });
-                checkbox.dispatchEvent(changeEvent);
-            }
-        });
         
         elements.nonFollowersTable.appendChild(row);
     });
@@ -1136,6 +1157,7 @@ function populateNonFollowersTable() {
     });
     
     // Set up the select all checkbox
+    elements.selectAllCheckbox.classList.add('custom-checkbox');
     elements.selectAllCheckbox.addEventListener('change', function() {
         document.querySelectorAll('.account-checkbox').forEach(checkbox => {
             checkbox.checked = this.checked;
@@ -1184,39 +1206,90 @@ async function handleLogin() {
         return;
     }
     
+    elements.loginButton.disabled = true;
+    elements.loginButton.innerHTML = '<span class="spinner"></span> ' + __('login') + '...';
+    
     try {
-        elements.loginButton.disabled = true;
-        elements.loginButton.innerHTML = '<span class="spinner"></span> ' + __('login') + '...';
-        
+        console.log("Starting login process");
         // Load whitelist from localStorage
         state.whitelist = loadWhitelist();
         
-        // Login to Bluesky
-        state.session = await loginToBluesky(identifier, password);
-        
-        // Fetch follows and followers
-        elements.loginButton.innerHTML = '<span class="spinner"></span> ' + __('login') + '...';
-        state.follows = await getFollows();
-        
-        elements.loginButton.innerHTML = '<span class="spinner"></span> ' + __('login') + '...';
-        state.followers = await getFollowers();
-        
-        // Compute non-follow-backs
-        state.nonFollowBacks = findNonFollowBacks(state.follows, state.followers);
-        
-        // Update UI
-        updateUserInfo();
-        updateStats();
-        populateNonFollowersTable();
-        
-        // Show results section
-        hideElement(elements.loginSection);
-        showElement(elements.resultsSection);
-        showElement(elements.logoutContainer);
-        
-    } catch (error) {
-        showError(__('loginFailed'));
+        try {
+            // Login to Bluesky
+            console.log("Attempting login with Bluesky API");
+            state.session = await loginToBluesky(identifier, password);
+            console.log("Login successful, session established");
+
+            try {
+                // Fetch follows and followers
+                console.log("Starting data fetch");
+                elements.loginButton.innerHTML = '<span class="spinner"></span> ' + __('fetchingFollows') + '...';
+                state.follows = await getFollows();
+                console.log(`Successfully fetched ${state.follows.length} follows`);
+                
+                elements.loginButton.innerHTML = '<span class="spinner"></span> ' + __('fetchingFollowers') + '...';
+                state.followers = await getFollowers();
+                console.log(`Successfully fetched ${state.followers.length} followers`);
+                
+                // Process the data and update UI
+                console.log("Processing follower/following data");
+                // Compute non-follow-backs
+                state.nonFollowBacks = findNonFollowBacks(state.follows, state.followers);
+                
+                // Update UI
+                updateUserInfo();
+                updateStats();
+                populateNonFollowersTable();
+                
+                // Show results section
+                hideElement(elements.loginSection);
+                showElement(elements.resultsSection);
+                showElement(elements.logoutContainer);
+                
+                console.log("Login and data fetch process completed successfully");
+                return;
+                
+            } catch (dataError) {
+                // Error during data fetching
+                console.error("Error during data fetching:", dataError);
+                
+                // Only show error message if we actually have no data
+                if (state.followers.length === 0 && state.follows.length === 0) {
+                    console.log("No follower or following data could be retrieved");
+                    showError(__('errorFetchingData'));
+                } else {
+                    // We have at least some data, so proceed
+                    console.log("Partial data retrieved, continuing with available data");
+                    state.nonFollowBacks = findNonFollowBacks(state.follows, state.followers);
+                    
+                    // Update UI with what we have
+                    updateUserInfo();
+                    updateStats();
+                    populateNonFollowersTable();
+                    
+                    // Show results section
+                    hideElement(elements.loginSection);
+                    showElement(elements.resultsSection);
+                    showElement(elements.logoutContainer);
+                }
+            }
+        } catch (error) {
+            // This is specifically a login error
+            console.error("Authentication failed:", error);
+            
+            // Check for network errors which might be mistakenly reported as login failures
+            if (error.name === "TypeError" && error.message.includes("Failed to fetch")) {
+                showError("Network error: Check your internet connection and try again.");
+            } else {
+                showError(__('loginFailed'));
+            }
+        }
+    } catch (e) {
+        // Unexpected top-level error
+        console.error("Unexpected error in login process:", e);
+        showError(__('errorGeneric', {message: e.message || "Unknown error"}));
     } finally {
+        // Always reset the button
         elements.loginButton.disabled = false;
         elements.loginButton.textContent = __('loginButton');
     }
@@ -1497,29 +1570,49 @@ function handleLanguageChange(event) {
 }
 
 // Set up event listeners
-elements.loginButton.addEventListener('click', handleLogin);
-elements.unfollowButton.addEventListener('click', handleUnfollow);
-elements.createListButton.addEventListener('click', handleCreateList);
-elements.bothButton.addEventListener('click', handleBoth);
-elements.logoutButton.addEventListener('click', handleLogout);
+if (elements.loginButton) {
+    elements.loginButton.addEventListener('click', handleLogin);
+}
+if (elements.unfollowButton) {
+    elements.unfollowButton.addEventListener('click', handleUnfollow);
+}
+if (elements.createListButton) {
+    elements.createListButton.addEventListener('click', handleCreateList);
+}
+if (elements.bothButton) {
+    elements.bothButton.addEventListener('click', handleBoth);
+}
+if (elements.logoutButton) {
+    elements.logoutButton.addEventListener('click', handleLogout);
+}
 
 // Event listeners for followers you don't follow tab
-elements.followButton.addEventListener('click', handleFollow);
-elements.createFollowListButton.addEventListener('click', handleCreateFollowList);
-elements.bothFollowButton.addEventListener('click', handleBothFollow);
+if (elements.followButton) {
+    elements.followButton.addEventListener('click', handleFollow);
+}
+if (elements.createFollowListButton) {
+    elements.createFollowListButton.addEventListener('click', handleCreateFollowList);
+}
+if (elements.bothFollowButton) {
+    elements.bothFollowButton.addEventListener('click', handleBothFollow);
+}
 
 // Support for Enter key in login form
-elements.identifier.addEventListener('keyup', function(event) {
-    if (event.key === 'Enter') {
-        elements.password.focus();
-    }
-});
+if (elements.identifier) {
+    elements.identifier.addEventListener('keyup', function(event) {
+        if (event.key === 'Enter') {
+            elements.password.focus();
+        }
+    });
+}
 
-elements.password.addEventListener('keyup', function(event) {
-    if (event.key === 'Enter') {
-        handleLogin();
-    }
-});
+if (elements.password) {
+    elements.password.addEventListener('keyup', function(event) {
+        if (event.key === 'Enter') {
+            handleLogin();
+        }
+    });
+}
 
 // Initialize language
 function initializeLanguage() {
@@ -1585,7 +1678,7 @@ function populateFollowersYouDontFollowTable() {
         
         row.innerHTML = `
             <td>
-                <input type="checkbox" id="follower-checkbox-${index}" data-index="${index}" class="follower-checkbox" ${isWhitelisted ? '' : 'checked'}>
+                <input type="checkbox" id="follower-checkbox-${index}" data-index="${index}" class="follower-checkbox custom-checkbox" ${isWhitelisted ? '' : 'checked'}>
             </td>
             <td>
                 <span class="mobile-label">${__('account')}:</span>
@@ -1610,22 +1703,6 @@ function populateFollowersYouDontFollowTable() {
                     '–'}
             </td>
         `;
-        
-        // Make the entire row clickable (except for the checkbox or profile button)
-        row.style.cursor = 'pointer';
-        row.addEventListener('click', function(event) {
-            // Don't toggle if clicking directly on the checkbox or profile button
-            if (event.target.type !== 'checkbox' && 
-                !event.target.classList.contains('profile-button') &&
-                event.target.tagName !== 'A') {
-                const checkbox = this.querySelector('.follower-checkbox');
-                checkbox.checked = !checkbox.checked;
-                
-                // Trigger the change event manually
-                const changeEvent = new Event('change', { bubbles: true });
-                checkbox.dispatchEvent(changeEvent);
-            }
-        });
         
         elements.followersYouDontFollowTable.appendChild(row);
     });
@@ -1660,6 +1737,7 @@ function populateFollowersYouDontFollowTable() {
     });
     
     // Set up the select all checkbox
+    elements.selectAllFollowersCheckbox.classList.add('custom-checkbox');
     elements.selectAllFollowersCheckbox.addEventListener('change', function() {
         document.querySelectorAll('.follower-checkbox').forEach(checkbox => {
             checkbox.checked = this.checked;
@@ -1732,6 +1810,11 @@ async function handleLoadPostCounts() {
 
 // Handle follow action
 async function handleFollow() {
+    // Check if data is loaded, and load it if needed
+    if (state.followersYouDontFollow.length === 0 && state.followers.length > 0 && state.follows.length > 0) {
+        await loadFollowersYouDontFollow();
+    }
+
     if (state.selectedFollowerIndices.size === 0) return;
     
     if (!confirm(__('confirmFollow', {count: state.selectedFollowerIndices.size}))) {
@@ -1789,6 +1872,11 @@ async function handleFollow() {
 
 // Handle create list for followers you don't follow
 async function handleCreateFollowList() {
+    // Check if data is loaded, and load it if needed
+    if (state.followersYouDontFollow.length === 0 && state.followers.length > 0 && state.follows.length > 0) {
+        await loadFollowersYouDontFollow();
+    }
+    
     if (state.selectedFollowerIndices.size === 0) return;
     
     try {
@@ -1843,6 +1931,11 @@ async function handleCreateFollowList() {
 
 // Handle both (create list and follow) action
 async function handleBothFollow() {
+    // Check if data is loaded, and load it if needed
+    if (state.followersYouDontFollow.length === 0 && state.followers.length > 0 && state.follows.length > 0) {
+        await loadFollowersYouDontFollow();
+    }
+    
     if (state.selectedFollowerIndices.size === 0) return;
     
     if (!confirm(__('confirmBothFollow', {count: state.selectedFollowerIndices.size}))) {

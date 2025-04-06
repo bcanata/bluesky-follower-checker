@@ -379,6 +379,60 @@
             justify-content: center;
             align-items: center;
         }
+
+        /* Custom checkbox styles */
+        .custom-checkbox {
+            appearance: none;
+            -webkit-appearance: none;
+            width: 24px;
+            height: 24px;
+            border: 2px solid var(--primary);
+            border-radius: 4px;
+            display: inline-block;
+            position: relative;
+            cursor: pointer;
+            margin-right: 10px;
+            vertical-align: middle;
+            background-color: white;
+        }
+
+        .custom-checkbox:checked {
+            background-color: var(--primary);
+        }
+
+        .custom-checkbox:checked:after {
+            content: '';
+            position: absolute;
+            left: 7px;
+            top: 3px;
+            width: 6px;
+            height: 12px;
+            border: solid white;
+            border-width: 0 3px 3px 0;
+            transform: rotate(45deg);
+        }
+
+        .custom-checkbox:focus {
+            outline: 2px solid var(--primary-dark);
+            outline-offset: 2px;
+        }
+
+        /* Remove the clickable row styles */
+        tr {
+            cursor: default !important;
+        }
+
+        @media (max-width: 480px) {
+            .tab-container {
+                flex-direction: row;
+                overflow-x: auto;
+            }
+            
+            .tab-button {
+                flex: 0 0 auto;
+                padding: 8px 12px;
+            }
+        }
     </style>
 </head>
 <body>

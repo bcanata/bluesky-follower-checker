@@ -14,6 +14,9 @@ const languages = {
         whitelistInfo: "When you uncheck accounts, they will be remembered and automatically unchecked next time you use the tool. Your whitelist is saved in your browser.",
         loginButton: "Login & Check Followers",
         logout: "Logout",
+        fetchingFollows: "Fetching follows...",
+        fetchingFollowers: "Fetching followers...",
+        errorFetchingData: "Error loading data. Login was successful, but there was an error retrieving your follower information.",
         
         // Tabs
         tabNonFollowers: "Non-Followers",
@@ -121,6 +124,9 @@ const languages = {
         whitelistInfo: "Bir hesabın işaretini kaldırırsanız, bu hatırlanacak ve aracı bir sonraki kullanışınızda otomatik olarak işaretsiz olacaktır. Beyaz listeniz tarayıcınızda saklanır.",
         loginButton: "Giriş Yap ve Takipçileri Kontrol Et",
         logout: "Çıkış Yap",
+        fetchingFollows: "Takip edilenler yükleniyor...",
+        fetchingFollowers: "Takipçiler yükleniyor...",
+        errorFetchingData: "Veri yükleme hatası. Giriş başarılı oldu, ancak takipçi bilgileriniz alınırken bir hata oluştu.",
         
         // Tabs
         tabNonFollowers: "Takip Etmeyenler",
