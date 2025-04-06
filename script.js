@@ -59,18 +59,23 @@ const BLUESKY_API = 'https://bsky.social';
 const RATE_LIMITS = {
     // Direct operation limits
     UNFOLLOW_DELAY_MS: 1000, // 1 second between unfollows (can be lower now based on Bluesky's limits)
+    FOLLOW_DELAY_MS: 1000, // 1 second between follows
     PROFILE_INFO_DELAY_MS: 25, // 25ms between profile info requests (less conservative)
     
     // Bluesky's documented rate limits (as of April 2025)
     MAX_UNFOLLOWS_PER_MINUTE: 60, // Can be higher based on 5,000 points/hour limit for DELETE ops (1 point each)
+    MAX_FOLLOWS_PER_MINUTE: 60, // Similar limit for follows (CREATE operations = 3 points)
     MAX_UNFOLLOWS_PER_HOUR: 3000, // Value lower than the 5,000 points/hour to be safe
+    MAX_FOLLOWS_PER_HOUR: 1600, // Lower since CREATE operations cost 3 points (5000/3 ≈ 1666)
     MAX_UNFOLLOWS_PER_DAY: 30000, // Value lower than the 35,000 points/day to be safe
+    MAX_FOLLOWS_PER_DAY: 10000, // Lower since CREATE operations cost 3 points (35000/3 ≈ 11666)
     MAX_API_REQUESTS: 2500 // 3000 per 5 minutes, using 2500 to be conservative
 };
 
 // LocalStorage keys
 const STORAGE_KEYS = {
-    WHITELIST: 'blueskyFollowerCheckerWhitelist'
+    WHITELIST: 'blueskyFollowerCheckerWhitelist',
+    FOLLOW_WHITELIST: 'blueskyFollowerCheckerFollowWhitelist'
 };
 
 // State management
@@ -79,8 +84,11 @@ const state = {
     follows: [],
     followers: [],
     nonFollowBacks: [],
-    whitelist: new Set(), // Whitelist of handles
-    selectedIndices: new Set()
+    followersYouDontFollow: [], // New: followers that you don't follow back
+    whitelist: new Set(), // Whitelist of handles (for non-followers)
+    followWhitelist: new Set(), // Whitelist of handles (for followers you don't follow)
+    selectedIndices: new Set(),
+    selectedFollowerIndices: new Set() // Selected indices for the follow tab
 };
 
 // DOM Elements
@@ -119,6 +127,28 @@ const elements = {
     // Tabs
     tabButtons: document.querySelectorAll('.tab-button'),
     tabContents: document.querySelectorAll('.tab-content'),
+    
+    // New: Followers you don't follow tab elements
+    followersYouDontFollowTab: document.getElementById('followersYouDontFollowTab'),
+    followersYouDontFollowTable: document.getElementById('followersYouDontFollowTable'),
+    followersYouDontFollowStatsContainer: document.getElementById('followersYouDontFollowStatsContainer'),
+    selectAllFollowersCheckbox: document.getElementById('selectAllFollowersCheckbox'),
+    
+    // Post counts loading
+    loadingPostCounts: document.getElementById('loadingPostCounts'),
+    postCountsProgress: document.getElementById('postCountsProgress'),
+    postCountsProgressBar: document.getElementById('postCountsProgressBar'),
+    
+    // Follow action elements
+    followButton: document.getElementById('followButton'),
+    createFollowListButton: document.getElementById('createFollowListButton'),
+    bothFollowButton: document.getElementById('bothFollowButton'),
+    followActionProgress: document.getElementById('followActionProgress'),
+    followActionTitle: document.getElementById('followActionTitle'),
+    followActionStatus: document.getElementById('followActionStatus'),
+    followActionProgressBar: document.getElementById('followActionProgressBar'),
+    followActionResults: document.getElementById('followActionResults'),
+    followActionResultsContent: document.getElementById('followActionResultsContent'),
     
     // Logout
     logoutContainer: document.getElementById('logoutContainer'),
@@ -223,6 +253,303 @@ function saveWhitelist(whitelist) {
     }
 }
 
+// Function to find followers you don't follow back
+function findFollowersYouDontFollow(follows, followers) {
+    const followHandles = new Set(follows.map(f => f.handle.toLowerCase()));
+    return followers.filter(follower => !followHandles.has(follower.handle.toLowerCase()));
+}
+
+// Load whitelist for followers you don't follow
+function loadFollowWhitelist() {
+    try {
+        const whitelistStr = localStorage.getItem(STORAGE_KEYS.FOLLOW_WHITELIST);
+        if (!whitelistStr) return new Set();
+        
+        return new Set(JSON.parse(whitelistStr));
+    } catch (e) {
+        console.error('Failed to load follow whitelist', e);
+        return new Set();
+    }
+}
+
+// Save whitelist for followers you don't follow
+function saveFollowWhitelist(whitelist) {
+    try {
+        localStorage.setItem(STORAGE_KEYS.FOLLOW_WHITELIST, JSON.stringify(Array.from(whitelist)));
+    } catch (e) {
+        console.error('Failed to save follow whitelist', e);
+    }
+}
+
+// Fetch post counts for users
+async function getPostInfo(did) {
+    if (!state.session) throw new Error("Not logged in");
+    
+    try {
+        const url = new URL(`${BLUESKY_API}/xrpc/app.bsky.actor.getProfile`);
+        url.searchParams.append("actor", did);
+        
+        const response = await fetch(url.toString(), {
+            headers: { 
+                "Authorization": `Bearer ${state.session.accessJwt}` 
+            }
+        });
+
+        if (!response.ok) {
+            return { postsCount: 0 };
+        }
+
+        const data = await response.json();
+        return { 
+            postsCount: data.postsCount || 0
+        };
+    } catch (error) {
+        console.error(`Error fetching profile for ${did}:`, error);
+        return { postsCount: 0 };
+    }
+}
+
+// Enrich users with post count data
+async function enrichWithPostData(users, progressCallback) {
+    for (let i = 0; i < users.length; i++) {
+        const user = users[i];
+        if (user.did) {
+            try {
+                const profile = await getPostInfo(user.did);
+                user.postsCount = profile.postsCount;
+                
+                // Report progress
+                const progress = Math.round((i + 1) / users.length * 100);
+                if (progressCallback) {
+                    progressCallback(progress);
+                }
+                
+                // Add a small delay to avoid hitting rate limits
+                await new Promise(resolve => setTimeout(resolve, RATE_LIMITS.PROFILE_INFO_DELAY_MS));
+            } catch (error) {
+                // Continue with next user if there's an error
+            }
+        }
+    }
+    
+    return users;
+}
+
+// Follow a user
+async function followUser(did) {
+    if (!state.session) throw new Error("Not logged in");
+    if (!did) throw new Error("Invalid DID provided");
+    
+    try {
+        const response = await fetch(`${BLUESKY_API}/xrpc/com.atproto.repo.createRecord`, {
+            method: "POST",
+            headers: {
+                "Authorization": `Bearer ${state.session.accessJwt}`,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                repo: state.session.did,
+                collection: "app.bsky.graph.follow",
+                record: {
+                    subject: did,
+                    createdAt: new Date().toISOString()
+                }
+            })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            console.error(`Failed to follow: ${error.message || "Unknown error"}`);
+            return false;
+        }
+        
+        return true;
+    } catch (error) {
+        console.error("Follow error:", error);
+        return false;
+    }
+}
+
+// Follow selected users
+async function followSelected(users, selectedIndices, progressCallback, statusCallback) {
+    if (selectedIndices.size === 0) {
+        return { successful: 0, failed: 0 };
+    }
+
+    const indices = Array.from(selectedIndices);
+    let successful = 0;
+    let failed = 0;
+    let minuteCounter = 0;
+    let hourCounter = 0;
+    const startTime = Date.now();
+    
+    // Store operation counts for rate limiting
+    const opCounts = {
+        minute: 0,
+        hour: 0,
+        day: 0
+    };
+    
+    for (let i = 0; i < indices.length; i++) {
+        const index = indices[i];
+        const user = users[index];
+        if (!user?.did) {
+            failed++;
+            continue;
+        }
+        
+        // Check if we've hit any rate limits
+        const currentMinute = Math.floor((Date.now() - startTime) / 60000);
+        const currentHour = Math.floor((Date.now() - startTime) / 3600000);
+        
+        // Minute threshold check
+        if (currentMinute > minuteCounter) {
+            minuteCounter = currentMinute;
+            opCounts.minute = 0; // Reset minute counter when minute changes
+            if (statusCallback) {
+                statusCallback(__(__('minute', {count: minuteCounter + 1})));
+            }
+        }
+        
+        // Hour threshold check
+        if (currentHour > hourCounter) {
+            hourCounter = currentHour;
+            opCounts.hour = 0; // Reset hour counter when hour changes
+            if (statusCallback) {
+                statusCallback(__('hour', {count: hourCounter + 1}));
+            }
+        }
+        
+        // Check if we need to pause due to rate limits
+        if (opCounts.minute >= RATE_LIMITS.MAX_FOLLOWS_PER_MINUTE) {
+            const waitTime = 60000 - ((Date.now() - startTime) % 60000);
+            if (statusCallback) {
+                statusCallback(__('minuteRateLimitReached', {seconds: Math.ceil(waitTime / 1000)}));
+            }
+            await countdownTimer(Math.ceil(waitTime / 1000), 'minuteRateLimitReached', statusCallback);
+            if (statusCallback) {
+                statusCallback(__('continuing'));
+            }
+            minuteCounter++;
+            opCounts.minute = 0;
+        }
+        
+        // Check if we've hit hourly limit
+        if (opCounts.hour >= RATE_LIMITS.MAX_FOLLOWS_PER_HOUR) {
+            const waitTime = 3600000 - ((Date.now() - startTime) % 3600000);
+            if (statusCallback) {
+                statusCallback(__('hourlyRateLimitReached', {minutes: Math.ceil(waitTime / 60000)}));
+            }
+            await countdownTimerMinutes(Math.ceil(waitTime / 60000), 'hourlyRateLimitReached', statusCallback);
+            if (statusCallback) {
+                statusCallback(__('continuing'));
+            }
+            hourCounter++;
+            opCounts.hour = 0;
+        }
+        
+        // Check if we've hit daily limit
+        if (successful >= RATE_LIMITS.MAX_FOLLOWS_PER_DAY) {
+            if (statusCallback) {
+                statusCallback(__('dailyRateLimitReached'));
+            }
+            break; // Stop processing if we hit the daily limit
+        }
+
+        if (statusCallback) {
+            statusCallback(__('following', {handle: user.handle, current: i + 1, total: indices.length}));
+        }
+        
+        const result = await followUser(user.did);
+        
+        if (result) {
+            successful++;
+            // Increment operation counters
+            opCounts.minute++;
+            opCounts.hour++;
+            opCounts.day++;
+        } else {
+            failed++;
+        }
+        
+        // Report progress
+        if (progressCallback) {
+            progressCallback(Math.round((i + 1) / indices.length * 100));
+        }
+        
+        // Small delay between requests to be nice to the API
+        await new Promise(resolve => setTimeout(resolve, RATE_LIMITS.FOLLOW_DELAY_MS));
+    }
+    
+    return { successful, failed };
+}
+
+// Create a list of followers you don't follow
+async function createFollowListWithAccounts(users, selectedIndices, progressCallback, statusCallback) {
+    if (selectedIndices.size === 0) {
+        return null;
+    }
+
+    const indices = Array.from(selectedIndices);
+    const selectedUsers = indices.map(index => users[index]);
+
+    const date = new Date();
+    const dateString = date.toISOString().split('T')[0]; // YYYY-MM-DD
+    const listName = `Followers I Don't Follow ${dateString}`;
+    const listDescription = `Accounts that follow me but I don't follow back (as of ${dateString})`;
+
+    if (statusCallback) {
+        statusCallback(__('creatingList', {name: listName}));
+    }
+    
+    const listUri = await createList(listName, listDescription);
+    
+    if (!listUri) {
+        return null;
+    }
+    
+    if (statusCallback) {
+        statusCallback(__('listCreated', {count: selectedUsers.length}));
+    }
+    
+    let successful = 0;
+    let failed = 0;
+    
+    for (let i = 0; i < selectedUsers.length; i++) {
+        const user = selectedUsers[i];
+        
+        if (!user.did) {
+            failed++;
+            continue;
+        }
+        
+        const result = await addUserToList(listUri, user.did);
+        
+        if (result) {
+            successful++;
+        } else {
+            failed++;
+        }
+        
+        // Report progress
+        if (progressCallback) {
+            progressCallback(Math.round((i + 1) / selectedUsers.length * 100));
+        }
+        
+        // Small delay to avoid rate limits
+        await new Promise(resolve => setTimeout(resolve, RATE_LIMITS.PROFILE_INFO_DELAY_MS));
+    }
+    
+    // Extract the handle and rkey from the URI
+    // Format is at://did:plc:xyz/app.bsky.graph.list/rkey
+    const parts = listUri.split('/');
+    const handle = state.session.handle;
+    const rkey = parts[parts.length - 1];
+    const listUrl = `https://bsky.app/profile/${handle}/lists/${rkey}`;
+    
+    return { successful, failed, listUri, listUrl };
+}
+
 // Tab functionality
 elements.tabButtons.forEach(button => {
     button.addEventListener('click', () => {
@@ -234,10 +561,24 @@ elements.tabButtons.forEach(button => {
         
         // Update active tab content
         elements.tabContents.forEach(content => content.classList.remove('active'));
-        const activeContent = tab === 'nonFollowers' ? 
-            document.getElementById('nonFollowersTab') : 
-            document.getElementById('actionsTab');
-        activeContent.classList.add('active');
+        
+        // Activate the correct tab content
+        let activeContent;
+        if (tab === 'nonFollowers') {
+            activeContent = document.getElementById('nonFollowersTab');
+        } else if (tab === 'followersYouDontFollow') {
+            activeContent = document.getElementById('followersYouDontFollowTab');
+            // If this tab is being activated and we haven't loaded the data yet, do it now
+            if (state.followersYouDontFollow.length === 0 && state.followers.length > 0 && state.follows.length > 0) {
+                loadFollowersYouDontFollow();
+            }
+        } else {
+            activeContent = document.getElementById('actionsTab');
+        }
+        
+        if (activeContent) {
+            activeContent.classList.add('active');
+        }
     });
 });
 
@@ -1164,6 +1505,11 @@ elements.createListButton.addEventListener('click', handleCreateList);
 elements.bothButton.addEventListener('click', handleBoth);
 elements.logoutButton.addEventListener('click', handleLogout);
 
+// Event listeners for followers you don't follow tab
+elements.followButton.addEventListener('click', handleFollow);
+elements.createFollowListButton.addEventListener('click', handleCreateFollowList);
+elements.bothFollowButton.addEventListener('click', handleBothFollow);
+
 // Support for Enter key in login form
 elements.identifier.addEventListener('keyup', function(event) {
     if (event.key === 'Enter') {
@@ -1191,3 +1537,392 @@ function initializeLanguage() {
 
 // Call after DOM is loaded
 document.addEventListener('DOMContentLoaded', initializeLanguage);
+
+// Load followers you don't follow data
+async function loadFollowersYouDontFollow() {
+    if (!state.session) return;
+    if (state.followers.length === 0 || state.follows.length === 0) return;
+    
+    // Find followers that you don't follow back
+    state.followersYouDontFollow = findFollowersYouDontFollow(state.follows, state.followers);
+    
+    // Load the follow whitelist
+    state.followWhitelist = loadFollowWhitelist();
+    
+    // Update UI
+    updateFollowersYouDontFollowStats();
+    populateFollowersYouDontFollowTable();
+}
+
+// Update stats for followers you don't follow
+function updateFollowersYouDontFollowStats() {
+    const followersYouDontFollowCount = state.followersYouDontFollow.length;
+    const followWhitelistedCount = state.followWhitelist.size;
+    
+    elements.followersYouDontFollowStatsContainer.innerHTML = `
+        <div class="info-box">
+            <h4>${__('followersYouDontFollowCount', {count: followersYouDontFollowCount})} <span class="badge">${followersYouDontFollowCount}</span></h4>
+            ${followWhitelistedCount > 0 ? 
+                `<p><small>${__('followWhitelistedCount', {count: followWhitelistedCount})}</small></p>` : ''}
+            <p><button id="loadPostCountsBtn">${__('loadPostCounts')}</button></p>
+        </div>
+    `;
+    
+    // Add event listener to the load post counts button
+    document.getElementById('loadPostCountsBtn').addEventListener('click', handleLoadPostCounts);
+}
+
+// Populate the table with followers you don't follow
+function populateFollowersYouDontFollowTable() {
+    elements.followersYouDontFollowTable.innerHTML = '';
+    
+    state.followersYouDontFollow.forEach((user, index) => {
+        const row = document.createElement('tr');
+        
+        // Check if user is whitelisted
+        const isWhitelisted = state.followWhitelist.has(user.handle.toLowerCase());
+        
+        // Create profile URL
+        const profileUrl = `https://bsky.app/profile/${user.handle}`;
+        
+        row.innerHTML = `
+            <td>
+                <input type="checkbox" id="follower-checkbox-${index}" data-index="${index}" class="follower-checkbox" ${isWhitelisted ? '' : 'checked'}>
+            </td>
+            <td>
+                <span class="mobile-label">${__('account')}:</span>
+                <div>
+                    <strong>${user.displayName || user.handle}</strong>
+                    <small>@${user.handle}</small>
+                    <a href="${profileUrl}" target="_blank" class="profile-button" aria-label="${__('visitProfile')}">
+                        <span class="external-link-icon">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                                <polyline points="15 3 21 3 21 9"></polyline>
+                                <line x1="10" y1="14" x2="21" y2="3"></line>
+                            </svg>
+                        </span>
+                    </a>
+                </div>
+            </td>
+            <td class="posts-count">
+                <span class="mobile-label">Posts:</span>
+                ${user.postsCount !== undefined ? 
+                    __('postCount', {count: user.postsCount}) : 
+                    '–'}
+            </td>
+        `;
+        
+        // Make the entire row clickable (except for the checkbox or profile button)
+        row.style.cursor = 'pointer';
+        row.addEventListener('click', function(event) {
+            // Don't toggle if clicking directly on the checkbox or profile button
+            if (event.target.type !== 'checkbox' && 
+                !event.target.classList.contains('profile-button') &&
+                event.target.tagName !== 'A') {
+                const checkbox = this.querySelector('.follower-checkbox');
+                checkbox.checked = !checkbox.checked;
+                
+                // Trigger the change event manually
+                const changeEvent = new Event('change', { bubbles: true });
+                checkbox.dispatchEvent(changeEvent);
+            }
+        });
+        
+        elements.followersYouDontFollowTable.appendChild(row);
+    });
+    
+    // Add event listeners to the checkboxes
+    document.querySelectorAll('.follower-checkbox').forEach(checkbox => {
+        checkbox.addEventListener('change', function() {
+            const index = parseInt(this.getAttribute('data-index'));
+            const user = state.followersYouDontFollow[index];
+            
+            if (!this.checked) {
+                // Add to whitelist when unchecked
+                state.followWhitelist.add(user.handle.toLowerCase());
+                state.selectedFollowerIndices.delete(index);
+            } else {
+                // Remove from whitelist when checked
+                state.followWhitelist.delete(user.handle.toLowerCase());
+                state.selectedFollowerIndices.add(index);
+            }
+            
+            // Save whitelist to localStorage
+            saveFollowWhitelist(state.followWhitelist);
+            
+            updateFollowActionButtons();
+        });
+        
+        // Add checked accounts to selectedFollowerIndices
+        const index = parseInt(checkbox.getAttribute('data-index'));
+        if (checkbox.checked) {
+            state.selectedFollowerIndices.add(index);
+        }
+    });
+    
+    // Set up the select all checkbox
+    elements.selectAllFollowersCheckbox.addEventListener('change', function() {
+        document.querySelectorAll('.follower-checkbox').forEach(checkbox => {
+            checkbox.checked = this.checked;
+            const index = parseInt(checkbox.getAttribute('data-index'));
+            const user = state.followersYouDontFollow[index];
+            
+            if (!this.checked) {
+                // Add to whitelist when unchecked
+                state.followWhitelist.add(user.handle.toLowerCase());
+                state.selectedFollowerIndices.delete(index);
+            } else {
+                // Remove from whitelist when checked
+                state.followWhitelist.delete(user.handle.toLowerCase());
+                state.selectedFollowerIndices.add(index);
+            }
+        });
+        
+        // Save whitelist to localStorage
+        saveFollowWhitelist(state.followWhitelist);
+        
+        updateFollowActionButtons();
+    });
+    
+    updateFollowActionButtons();
+}
+
+// Update follow action buttons
+function updateFollowActionButtons() {
+    const selectedCount = state.selectedFollowerIndices.size;
+    elements.followButton.textContent = __('followButton', {count: selectedCount});
+    elements.createFollowListButton.textContent = __('createFollowListButton', {count: selectedCount});
+    elements.bothFollowButton.textContent = __('bothFollowButton', {count: selectedCount});
+    
+    const buttonsDisabled = selectedCount === 0;
+    elements.followButton.disabled = buttonsDisabled;
+    elements.createFollowListButton.disabled = buttonsDisabled;
+    elements.bothFollowButton.disabled = buttonsDisabled;
+}
+
+// Load post counts for followers you don't follow
+async function handleLoadPostCounts() {
+    try {
+        // Show loading UI
+        showElement(elements.loadingPostCounts);
+        document.getElementById('loadPostCountsBtn').disabled = true;
+        
+        // Update post counts with progress updates
+        await enrichWithPostData(state.followersYouDontFollow, (progress) => {
+            elements.postCountsProgress.textContent = `${progress}`;
+            setProgressBar(elements.postCountsProgressBar, progress);
+        });
+        
+        // Update the table with post counts
+        document.querySelectorAll('.posts-count').forEach((cell, index) => {
+            const user = state.followersYouDontFollow[index];
+            cell.textContent = __('postCount', {count: user.postsCount || 0});
+        });
+        
+        // Hide loading UI
+        hideElement(elements.loadingPostCounts);
+        document.getElementById('loadPostCountsBtn').textContent = __('refreshPostCounts');
+        document.getElementById('loadPostCountsBtn').disabled = false;
+        
+    } catch (error) {
+        showError(__('errorLoadingCounts', {message: error.message}));
+        hideElement(elements.loadingPostCounts);
+        document.getElementById('loadPostCountsBtn').disabled = false;
+    }
+}
+
+// Handle follow action
+async function handleFollow() {
+    if (state.selectedFollowerIndices.size === 0) return;
+    
+    if (!confirm(__('confirmFollow', {count: state.selectedFollowerIndices.size}))) {
+        return;
+    }
+    
+    try {
+        // Show progress UI
+        elements.followActionTitle.textContent = __('followButton', {count: state.selectedFollowerIndices.size});
+        showElement(elements.followActionProgress);
+        hideElement(elements.followActionResults);
+        
+        elements.followButton.disabled = true;
+        elements.createFollowListButton.disabled = true;
+        elements.bothFollowButton.disabled = true;
+        
+        // Execute follow operation
+        const result = await followSelected(
+            state.followersYouDontFollow,
+            state.selectedFollowerIndices,
+            (progress) => {
+                setProgressBar(elements.followActionProgressBar, progress);
+            },
+            (status) => {
+                elements.followActionStatus.textContent = status;
+            }
+        );
+        
+        // Show results
+        showElement(elements.followActionResults);
+        elements.followActionResultsContent.innerHTML = `
+            <p>${__('successfullyFollowed', {count: result.successful})}</p>
+            ${result.failed > 0 ? `<p>${__('failedToFollow', {count: result.failed})}</p>` : ''}
+        `;
+        
+        // Re-enable buttons
+        elements.followButton.disabled = false;
+        elements.createFollowListButton.disabled = false;
+        elements.bothFollowButton.disabled = false;
+        
+        // Reload data if any follows were successful
+        if (result.successful > 0) {
+            await reloadData();
+            // Reload the followers you don't follow tab since it's changed
+            loadFollowersYouDontFollow();
+        }
+        
+    } catch (error) {
+        showError(__('errorFollowing', {message: error.message}));
+        elements.followButton.disabled = false;
+        elements.createFollowListButton.disabled = false;
+        elements.bothFollowButton.disabled = false;
+    }
+}
+
+// Handle create list for followers you don't follow
+async function handleCreateFollowList() {
+    if (state.selectedFollowerIndices.size === 0) return;
+    
+    try {
+        // Show progress UI
+        elements.followActionTitle.textContent = __('createFollowListButton', {count: state.selectedFollowerIndices.size});
+        showElement(elements.followActionProgress);
+        hideElement(elements.followActionResults);
+        
+        elements.followButton.disabled = true;
+        elements.createFollowListButton.disabled = true;
+        elements.bothFollowButton.disabled = true;
+        
+        // Execute list creation
+        const result = await createFollowListWithAccounts(
+            state.followersYouDontFollow,
+            state.selectedFollowerIndices,
+            (progress) => {
+                setProgressBar(elements.followActionProgressBar, progress);
+            },
+            (status) => {
+                elements.followActionStatus.textContent = status;
+            }
+        );
+        
+        // Show results
+        showElement(elements.followActionResults);
+        if (result) {
+            elements.followActionResultsContent.innerHTML = `
+                <p>${__('listCreatedSuccess')}</p>
+                <p>${__('accountsAdded', {count: result.successful})}</p>
+                ${result.failed > 0 ? `<p>${__('failedToAdd', {count: result.failed})}</p>` : ''}
+                <p><a href="${result.listUrl}" target="_blank">${__('viewList')}</a></p>
+            `;
+        } else {
+            elements.followActionResultsContent.innerHTML = `
+                <p>${__('failedToCreateList')}</p>
+            `;
+        }
+        
+        // Re-enable buttons
+        elements.followButton.disabled = false;
+        elements.createFollowListButton.disabled = false;
+        elements.bothFollowButton.disabled = false;
+        
+    } catch (error) {
+        showError(__('errorCreatingList', {message: error.message}));
+        elements.followButton.disabled = false;
+        elements.createFollowListButton.disabled = false;
+        elements.bothFollowButton.disabled = false;
+    }
+}
+
+// Handle both (create list and follow) action
+async function handleBothFollow() {
+    if (state.selectedFollowerIndices.size === 0) return;
+    
+    if (!confirm(__('confirmBothFollow', {count: state.selectedFollowerIndices.size}))) {
+        return;
+    }
+    
+    try {
+        // First create the list
+        elements.followActionTitle.textContent = __('createFollowListButton', {count: state.selectedFollowerIndices.size});
+        showElement(elements.followActionProgress);
+        hideElement(elements.followActionResults);
+        
+        elements.followButton.disabled = true;
+        elements.createFollowListButton.disabled = true;
+        elements.bothFollowButton.disabled = true;
+        
+        // Step 1: Create list
+        const listResult = await createFollowListWithAccounts(
+            state.followersYouDontFollow,
+            state.selectedFollowerIndices,
+            (progress) => {
+                setProgressBar(elements.followActionProgressBar, progress);
+            },
+            (status) => {
+                elements.followActionStatus.textContent = status;
+            }
+        );
+        
+        // Step 2: Follow accounts
+        elements.followActionTitle.textContent = 'Following Accounts';
+        elements.followActionStatus.textContent = 'Preparing to follow...';
+        setProgressBar(elements.followActionProgressBar, 0);
+        
+        const followResult = await followSelected(
+            state.followersYouDontFollow,
+            state.selectedFollowerIndices,
+            (progress) => {
+                setProgressBar(elements.followActionProgressBar, progress);
+            },
+            (status) => {
+                elements.followActionStatus.textContent = status;
+            }
+        );
+        
+        // Show combined results
+        showElement(elements.followActionResults);
+        elements.followActionResultsContent.innerHTML = `
+            <h4>List Creation:</h4>
+            ${listResult ? `
+                <p>✅ List created successfully!</p>
+                <p>✅ Added ${listResult.successful} accounts to the list</p>
+                ${listResult.failed > 0 ? `<p>❌ Failed to add ${listResult.failed} accounts</p>` : ''}
+                <p><a href="${listResult.listUrl}" target="_blank">View List on Bluesky</a></p>
+            ` : `
+                <p>❌ Failed to create list</p>
+            `}
+            
+            <h4>Follow Results:</h4>
+            <p>✅ Successfully followed: ${followResult.successful}</p>
+            ${followResult.failed > 0 ? `<p>❌ Failed to follow: ${followResult.failed}</p>` : ''}
+        `;
+        
+        // Re-enable buttons
+        elements.followButton.disabled = false;
+        elements.createFollowListButton.disabled = false;
+        elements.bothFollowButton.disabled = false;
+        
+        // Reload data if any follows were successful
+        if (followResult.successful > 0) {
+            await reloadData();
+            // Reload the followers you don't follow tab since it's changed
+            loadFollowersYouDontFollow();
+        }
+        
+    } catch (error) {
+        showError(__('errorGeneric', {message: error.message}));
+        elements.followButton.disabled = false;
+        elements.createFollowListButton.disabled = false;
+        elements.bothFollowButton.disabled = false;
+    }
+}

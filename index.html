@@ -426,6 +426,7 @@
         
         <div class="tab-container">
             <button class="tab-button active" data-tab="nonFollowers" data-lang="tabNonFollowers">Non-Followers</button>
+            <button class="tab-button" data-tab="followersYouDontFollow" data-lang="tabFollowersYouDontFollow">Followers You Don't Follow</button>
             <button class="tab-button" data-tab="actions" data-lang="tabActions">Actions</button>
         </div>
         
@@ -456,6 +457,58 @@
                         <!-- Will be populated by JavaScript -->
                     </tbody>
                 </table>
+            </div>
+        </div>
+        
+        <!-- New tab content for followers you don't follow -->
+        <div id="followersYouDontFollowTab" class="tab-content">
+            <div id="followersYouDontFollowStatsContainer"></div>
+            <div id="loadingPostCounts" class="hidden">
+                <p><span data-lang="loadingPostCounts">Loading post counts... {progress}%</span><span id="postCountsProgress">0</span>%</p>
+                <div class="progress-container">
+                    <div id="postCountsProgressBar" class="progress-bar"></div>
+                </div>
+            </div>
+            
+            <div class="checkbox-container">
+                <input type="checkbox" id="selectAllFollowersCheckbox">
+                <label for="selectAllFollowersCheckbox" data-lang="selectAll">Select/Deselect All</label>
+            </div>
+            
+            <div class="table-responsive">
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width: 50px;"></th>
+                            <th data-lang="account">Account</th>
+                            <th style="width: 120px;" data-lang="follows">Posts</th>
+                        </tr>
+                    </thead>
+                    <tbody id="followersYouDontFollowTable">
+                        <!-- Will be populated by JavaScript -->
+                    </tbody>
+                </table>
+            </div>
+            
+            <h3 data-lang="whatToDo">What would you like to do with selected accounts?</h3>
+            
+            <div class="actions-container">
+                <button id="followButton" data-lang="followButton">Follow Selected (0)</button>
+                <button id="createFollowListButton" data-lang="createFollowListButton">Create List (0)</button>
+                <button id="bothFollowButton" data-lang="bothFollowButton">Both (List & Follow) (0)</button>
+            </div>
+            
+            <div id="followActionProgress" class="hidden">
+                <h4 id="followActionTitle" data-lang="processing">Processing...</h4>
+                <p id="followActionStatus"></p>
+                <div class="progress-container">
+                    <div id="followActionProgressBar" class="progress-bar"></div>
+                </div>
+            </div>
+            
+            <div id="followActionResults" class="hidden">
+                <h4 data-lang="results">Results:</h4>
+                <div id="followActionResultsContent"></div>
             </div>
         </div>
         

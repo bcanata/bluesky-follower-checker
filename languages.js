@@ -19,6 +19,24 @@ const languages = {
         tabNonFollowers: "Non-Followers",
         tabActions: "Actions",
         
+        // New tab for followers you don't follow
+        tabFollowersYouDontFollow: "Followers You Don't Follow",
+        followersYouDontFollowCount: "Accounts that follow you but you don't follow back: {count}",
+        followWhitelistedCount: "{count} accounts have been whitelisted",
+        loadPostCounts: "Load Post Counts",
+        refreshPostCounts: "Refresh Post Counts",
+        loadingPostCounts: "Loading post counts... {progress}%",
+        postCount: "{count} posts",
+        followButton: "Follow Selected ({count})",
+        createFollowListButton: "Create List ({count})",
+        bothFollowButton: "Both (List & Follow) ({count})",
+        confirmFollow: "Are you sure you want to follow {count} accounts?",
+        confirmBothFollow: "Are you sure you want to create a list and follow {count} accounts?",
+        following: "Following @{handle} ({current}/{total})...",
+        successfullyFollowed: "Successfully followed: {count}",
+        failedToFollow: "Failed to follow: {count}",
+        errorFollowing: "Error following accounts: {message}",
+        
         // Stats and user info
         loggedInAs: "Logged in as @{handle}",
         followStats: "You follow <strong>{follows}</strong> accounts and have <strong>{followers}</strong> followers.",
@@ -107,6 +125,24 @@ const languages = {
         // Tabs
         tabNonFollowers: "Takip Etmeyenler",
         tabActions: "İşlemler",
+        
+        // New tab for followers you don't follow
+        tabFollowersYouDontFollow: "Takip Etmediğin Takipçiler",
+        followersYouDontFollowCount: "Sizi takip eden ancak sizin takip etmediğiniz hesaplar: {count}",
+        followWhitelistedCount: "{count} hesap beyaz listeye alındı",
+        loadPostCounts: "Gönderi Sayılarını Yükle",
+        refreshPostCounts: "Gönderi Sayılarını Yenile",
+        loadingPostCounts: "Gönderi sayıları yükleniyor... %{progress}",
+        postCount: "{count} gönderi",
+        followButton: "Seçilenleri Takip Et ({count})",
+        createFollowListButton: "Liste Oluştur ({count})",
+        bothFollowButton: "Her İkisi de (Liste ve Takip) ({count})",
+        confirmFollow: "{count} hesabı takip etmek istediğinizden emin misiniz?",
+        confirmBothFollow: "Liste oluşturmak ve {count} hesabı takip etmek istediğinizden emin misiniz?",
+        following: "@{handle} takip ediliyor ({current}/{total})...",
+        successfullyFollowed: "Başarıyla takip edildi: {count}",
+        failedToFollow: "Takip edilemedi: {count}",
+        errorFollowing: "Hesaplar takip edilirken hata: {message}",
         
         // Stats and user info
         loggedInAs: "@{handle} olarak giriş yapıldı",
