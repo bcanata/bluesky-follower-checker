@@ -1063,8 +1063,12 @@ function updateUserInfo() {
         <h3>${__('loggedInAs', {handle: state.session.handle})}</h3>
         <div id="stats">
             <p>${__('followStats', {follows: state.follows.length, followers: state.followers.length})}</p>
+            <button id="refreshDataButton">${__('refreshData')}</button>
         </div>
     `;
+    
+    // Add event listener to the refresh button
+    document.getElementById('refreshDataButton').addEventListener('click', handleRefreshData);
 }
 
 function updateStats() {
@@ -1555,6 +1559,53 @@ async function reloadData() {
         
     } catch (error) {
         showError(__('errorReloading', {message: error.message}));
+    }
+}
+
+// Function to handle refreshing followers and following data
+async function handleRefreshData() {
+    try {
+        const refreshButton = document.getElementById('refreshDataButton');
+        refreshButton.disabled = true;
+        refreshButton.innerHTML = '<span class="spinner"></span> ' + __('refreshingData');
+        
+        // Fetch fresh data
+        state.follows = await getFollows();
+        state.followers = await getFollowers();
+        
+        // Recompute non-follow-backs
+        state.nonFollowBacks = findNonFollowBacks(state.follows, state.followers);
+        
+        // Reset selected indices
+        state.selectedIndices = new Set();
+        state.selectedFollowerIndices = new Set();
+        
+        // Reset followers you don't follow data
+        state.followersYouDontFollow = [];
+        
+        // Update UI
+        updateUserInfo();
+        updateStats();
+        populateNonFollowersTable();
+        
+        // If the followers you don't follow tab is active, reload that data too
+        const followersYouDontFollowTab = document.getElementById('followersYouDontFollowTab');
+        if (followersYouDontFollowTab && followersYouDontFollowTab.classList.contains('active')) {
+            loadFollowersYouDontFollow();
+        }
+        
+        // Show a success message
+        alert(__('dataRefreshed'));
+        
+    } catch (error) {
+        showError(__('errorReloading', {message: error.message || 'Unknown error'}));
+    } finally {
+        // Reset the button state
+        const refreshButton = document.getElementById('refreshDataButton');
+        if (refreshButton) {
+            refreshButton.disabled = false;
+            refreshButton.textContent = __('refreshData');
+        }
     }
 }
 

@@ -108,7 +108,12 @@ const languages = {
         turkish: "Turkish",
         
         // Footer
-        footer: 'Made with ❤️ | <a href="https://github.com/bcanata/bluesky-follower-checker" target="_blank">View on GitHub</a>'
+        footer: 'Made with ❤️ | <a href="https://github.com/bcanata/bluesky-follower-checker" target="_blank">View on GitHub</a>',
+        
+        // Refresh button translations
+        refreshData: "Refresh Data",
+        refreshingData: "Refreshing data...",
+        dataRefreshed: "Data has been refreshed"
     },
     tr: {
         // Login and general UI
@@ -218,6 +223,11 @@ const languages = {
         turkish: "Türkçe",
         
         // Footer
-        footer: '❤️ ile yapıldı | <a href="https://github.com/bcanata/bluesky-follower-checker" target="_blank">GitHub\'da görüntüle</a>'
+        footer: '❤️ ile yapıldı | <a href="https://github.com/bcanata/bluesky-follower-checker" target="_blank">GitHub\'da görüntüle</a>',
+        
+        // Refresh button translations
+        refreshData: "Verileri Yenile",
+        refreshingData: "Veriler yenileniyor...",
+        dataRefreshed: "Veriler yenilendi"
     }
 };
